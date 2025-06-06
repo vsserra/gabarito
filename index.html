@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Scanner de Gabarito</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    video {
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+      position: absolute;
+      z-index: 0;
+    }
+    #moldura {
+      position: absolute;
+      border: 4px solid lime;
+      width: 80vw;
+      height: 60vh;
+      top: 20vh;
+      left: 10vw;
+      z-index: 1;
+      box-sizing: border-box;
+      pointer-events: none;
+    }
+    #capturar {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 20px;
+      font-size: 18px;
+      background: limegreen;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      z-index: 2;
+    }
+  </style>
+</head>
+<body>
+
+  <video id="video" autoplay playsinline></video>
+  <div id="moldura"></div>
+  <button id="capturar">Capturar</button>
+
+  <canvas id="canvas" style="display:none;"></canvas>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const botao = document.getElementById('capturar');
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then(stream => {
+        video.srcObject = stream;
+      });
+
+    botao.onclick = () => {
+      const largura = video.videoWidth;
+      const altura = video.videoHeight;
+
+      canvas.width = largura;
+      canvas.height = altura;
+      const contexto = canvas.getContext('2d');
+      contexto.drawImage(video, 0, 0, largura, altura);
+
+      const imagemBase64 = canvas.toDataURL("image/jpeg");
+
+      // Você pode salvar, exibir ou enviar essa imagem para o backend
+      console.log("Imagem capturada");
+      window.open(imagemBase64, "_blank");  // apenas para visualizar por enquanto
+    };
+  </script>
+
+</body>
+</html>
