@@ -53,6 +53,20 @@
       max-height: 200px;
       z-index: 4;
     }
+    #recapturar {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      font-size: 16px;
+      background: #444;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      z-index: 5;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -61,6 +75,7 @@
   <div id="overlayFrame"></div>
   <div id="feedback">Aguardando detecção...</div>
   <img id="resultado" />
+  <button id="recapturar">Nova Captura</button>
 
   <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
   <script>
@@ -70,6 +85,7 @@
     let overlay = document.getElementById('overlayFrame');
     let feedback = document.getElementById('feedback');
     let resultado = document.getElementById('resultado');
+    let recapturar = document.getElementById('recapturar');
     let captured = false;
 
     function ordenarPontos(pontos) {
@@ -89,6 +105,14 @@
       return { left: minX, top: minY, width: maxX - minX, height: maxY - minY };
     }
 
+    function desenharZonasDeBolhas(ctx) {
+      ctx.strokeStyle = 'red';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 10; i++) {
+        ctx.strokeRect(100, 250 + i * 90, 800, 60);
+      }
+    }
+
     function startApp() {
       navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
         .then(stream => {
@@ -100,6 +124,13 @@
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         startProcessing();
+      });
+
+      recapturar.addEventListener('click', () => {
+        captured = false;
+        resultado.style.display = 'none';
+        recapturar.style.display = 'none';
+        feedback.textContent = '🔍 Aguardando detecção dos 4 pontos...';
       });
     }
 
@@ -127,6 +158,10 @@
             let M = cv.moments(cnt);
             if (M.m00 !== 0) {
               pontos.push({ x: M.m10 / M.m00, y: M.m01 / M.m00 });
+              ctx.beginPath();
+              ctx.arc(M.m10 / M.m00, M.m01 / M.m00, 10, 0, 2 * Math.PI);
+              ctx.strokeStyle = 'cyan';
+              ctx.stroke();
             }
           }
         }
@@ -157,9 +192,13 @@
           let ctxResult = canvasResult.getContext('2d');
           let imgData = new ImageData(new Uint8ClampedArray(warped.data), 1000, 1414);
           ctxResult.putImageData(imgData, 0, 0);
+
+          desenharZonasDeBolhas(ctxResult);
+
           let base64 = canvasResult.toDataURL('image/png');
           resultado.src = base64;
           resultado.style.display = 'block';
+          recapturar.style.display = 'inline-block';
 
           let link = document.createElement('a');
           link.href = base64;
