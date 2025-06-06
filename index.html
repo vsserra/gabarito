@@ -1,78 +1,191 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <title>Scanner de Gabarito</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Scanner de Cartão-Resposta</title>
   <style>
-    body {
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
       margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: #000;
+      color: white;
+      height: 100%;
       overflow: hidden;
     }
-    video {
+
+    #videoElement, #canvasOutput {
+      position: absolute;
+      top: 0;
+      left: 0;
       width: 100vw;
       height: 100vh;
       object-fit: cover;
-      position: absolute;
       z-index: 0;
     }
-    #moldura {
-      position: absolute;
-      border: 4px solid lime;
-      width: 80vw;
-      height: 60vh;
-      top: 20vh;
-      left: 10vw;
+
+    #canvasOutput {
       z-index: 1;
-      box-sizing: border-box;
+    }
+
+    #feedback {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.6);
+      font-size: 18px;
+      font-weight: 600;
+      z-index: 2;
       pointer-events: none;
     }
-    #capturar {
+
+    #captureButton {
       position: absolute;
       bottom: 30px;
       left: 50%;
       transform: translateX(-50%);
-      padding: 12px 20px;
-      font-size: 18px;
-      background: limegreen;
-      color: white;
+      padding: 14px 24px;
+      font-size: 16px;
+      background-color: #00c851;
+      color: #fff;
       border: none;
-      border-radius: 8px;
+      border-radius: 30px;
+      box-shadow: 0 6px 12px rgba(0,0,0,0.2);
       z-index: 2;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    #captureButton:hover {
+      background-color: #009640;
+    }
+
+    @media (max-width: 600px) {
+      #feedback {
+        font-size: 16px;
+        padding: 8px 16px;
+      }
+      #captureButton {
+        font-size: 14px;
+        padding: 12px 20px;
+      }
     }
   </style>
 </head>
 <body>
 
-  <video id="video" autoplay playsinline></video>
-  <div id="moldura"></div>
-  <button id="capturar">Capturar</button>
+  <video id="videoElement" autoplay playsinline></video>
+  <canvas id="canvasOutput"></canvas>
+  <div id="feedback">Aguardando detecção...</div>
+  <button id="captureButton">📸 Capturar</button>
 
-  <canvas id="canvas" style="display:none;"></canvas>
+  <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 
   <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const botao = document.getElementById('capturar');
+    let video = document.getElementById('videoElement');
+    let canvas = document.getElementById('canvasOutput');
+    let feedback = document.getElementById('feedback');
+    let captureButton = document.getElementById('captureButton');
+    let streaming = false;
 
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-      .then(stream => {
-        video.srcObject = stream;
+    function onOpenCvReady() {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+        .then(stream => {
+          video.srcObject = stream;
+          video.play();
+        })
+        .catch(err => {
+          console.error("Erro ao acessar a câmera:", err);
+        });
+
+      video.addEventListener('canplay', () => {
+        if (!streaming) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          streaming = true;
+          startProcessing();
+        }
       });
+    }
 
-    botao.onclick = () => {
-      const largura = video.videoWidth;
-      const altura = video.videoHeight;
+    function startProcessing() {
+      let src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+      let gray = new cv.Mat();
+      let thresh = new cv.Mat();
+      let contours = new cv.MatVector();
+      let hierarchy = new cv.Mat();
+      let ctx = canvas.getContext('2d');
 
-      canvas.width = largura;
-      canvas.height = altura;
-      const contexto = canvas.getContext('2d');
-      contexto.drawImage(video, 0, 0, largura, altura);
+      function processFrame() {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        src.data.set(imageData.data);
 
-      const imagemBase64 = canvas.toDataURL("image/jpeg");
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+        cv.threshold(gray, thresh, 50, 255, cv.THRESH_BINARY_INV);
+        cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-      // Você pode salvar, exibir ou enviar essa imagem para o backend
-      console.log("Imagem capturada");
-      window.open(imagemBase64, "_blank");  // apenas para visualizar por enquanto
+        let markerCenters = [];
+        for (let i = 0; i < contours.size(); ++i) {
+          let cnt = contours.get(i);
+          let area = cv.contourArea(cnt);
+          if (area > 100 && area < 1000) {
+            let moments = cv.moments(cnt);
+            let cx = moments.m10 / moments.m00;
+            let cy = moments.m01 / moments.m00;
+            markerCenters.push({ x: cx, y: cy });
+          }
+          cnt.delete();
+        }
+
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = markerCenters.length === 4 ? 'lime' : 'red';
+        feedback.textContent = markerCenters.length === 4 ? '✅ Enquadrado corretamente' : '⚠️ Ajuste a posição';
+
+        // Moldura central estilizada
+        let w = canvas.width * 0.8;
+        let h = canvas.height * 0.6;
+        let x = (canvas.width - w) / 2;
+        let y = (canvas.height - h) / 2;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 30);
+        ctx.stroke();
+
+        requestAnimationFrame(processFrame);
+      }
+
+      requestAnimationFrame(processFrame);
+    }
+
+    captureButton.addEventListener('click', () => {
+      let image = canvas.toDataURL('image/png');
+      let link = document.createElement('a');
+      link.href = image;
+      link.download = 'cartao_resposta.png';
+      link.click();
+    });
+
+    // Adiciona suporte ao roundRect caso não exista
+    CanvasRenderingContext2D.prototype.roundRect = CanvasRenderingContext2D.prototype.roundRect || function (x, y, w, h, r) {
+      this.beginPath();
+      this.moveTo(x + r, y);
+      this.lineTo(x + w - r, y);
+      this.quadraticCurveTo(x + w, y, x + w, y + r);
+      this.lineTo(x + w, y + h - r);
+      this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      this.lineTo(x + r, y + h);
+      this.quadraticCurveTo(x, y + h, x, y + h - r);
+      this.lineTo(x, y + r);
+      this.quadraticCurveTo(x, y, x + r, y);
+      this.closePath();
     };
   </script>
 
