@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Scanner com Alinhamento Animado</title>
+  <title>Scanner com QR Code</title>
   <style>
     body, html {
       margin: 0;
@@ -18,18 +18,6 @@
       height: 100vh;
       object-fit: cover;
       z-index: 0;
-    }
-    #overlayFrame {
-      position: absolute;
-      border: 3px solid lime;
-      width: 80vw;
-      height: 60vh;
-      top: 20vh;
-      left: 10vw;
-      border-radius: 10px;
-      z-index: 2;
-      transition: all 0.3s ease-out;
-      pointer-events: none;
     }
     #feedback {
       position: absolute;
@@ -72,48 +60,21 @@
 <body>
   <video id="video" autoplay playsinline></video>
   <canvas id="canvasOutput"></canvas>
-  <div id="overlayFrame"></div>
-  <div id="feedback">Aguardando detecção...</div>
+  <div id="feedback">Aguardando QR Code...</div>
   <img id="resultado" />
   <button id="recapturar">Nova Captura</button>
 
-  <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <script>
-    let video = document.getElementById('video');
-    let canvas = document.getElementById('canvasOutput');
-    let ctx = canvas.getContext('2d');
-    let overlay = document.getElementById('overlayFrame');
-    let feedback = document.getElementById('feedback');
-    let resultado = document.getElementById('resultado');
-    let recapturar = document.getElementById('recapturar');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvasOutput');
+    const ctx = canvas.getContext('2d');
+    const feedback = document.getElementById('feedback');
+    const resultado = document.getElementById('resultado');
+    const recapturar = document.getElementById('recapturar');
     let captured = false;
 
-    function ordenarPontos(pontos) {
-      pontos.sort((a, b) => a.x + a.y - (b.x + b.y));
-      const [tl, br] = [pontos[0], pontos[3]];
-      const [tr, bl] = pontos[1].x > pontos[2].x ? [pontos[1], pontos[2]] : [pontos[2], pontos[1]];
-      return [tl, tr, br, bl];
-    }
-
-    function calcularEnvolvente(pontos) {
-      const xs = pontos.map(p => p.x);
-      const ys = pontos.map(p => p.y);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys);
-      return { left: minX, top: minY, width: maxX - minX, height: maxY - minY };
-    }
-
-    function desenharZonasDeBolhas(ctx) {
-      ctx.strokeStyle = 'red';
-      ctx.lineWidth = 2;
-      for (let i = 0; i < 10; i++) {
-        ctx.strokeRect(100, 250 + i * 90, 800, 60);
-      }
-    }
-
-    function startApp() {
+    function startCamera() {
       navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
         .then(stream => {
           video.srcObject = stream;
@@ -123,102 +84,59 @@
       video.addEventListener('canplay', () => {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        startProcessing();
+        processFrame();
       });
 
       recapturar.addEventListener('click', () => {
         captured = false;
         resultado.style.display = 'none';
         recapturar.style.display = 'none';
-        feedback.textContent = '🔍 Aguardando detecção dos 4 pontos...';
+        feedback.textContent = '🔍 Aguardando QR Code...';
       });
     }
 
-    function startProcessing() {
-      const src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
-      const gray = new cv.Mat();
-      const thresh = new cv.Mat();
-      const contours = new cv.MatVector();
-      const hierarchy = new cv.Mat();
+    function processFrame() {
+      if (captured) return;
 
-      function processFrame() {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        src.data.set(imageData.data);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
 
-        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-        cv.threshold(gray, thresh, 50, 255, cv.THRESH_BINARY_INV);
-        cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+      if (code) {
+        feedback.textContent = `✅ QR Code detectado! Conteúdo: ${code.data}`;
+        captured = true;
 
-        let pontos = [];
-        for (let i = 0; i < contours.size(); i++) {
-          let cnt = contours.get(i);
-          let area = cv.contourArea(cnt);
-          if (area > 500 && area < 5000) {
-            let M = cv.moments(cnt);
-            if (M.m00 !== 0) {
-              pontos.push({ x: M.m10 / M.m00, y: M.m01 / M.m00 });
-              ctx.beginPath();
-              ctx.arc(M.m10 / M.m00, M.m01 / M.m00, 10, 0, 2 * Math.PI);
-              ctx.strokeStyle = 'cyan';
-              ctx.stroke();
-            }
-          }
-        }
+        const corners = code.location;
+        const minX = Math.min(corners.topLeftCorner.x, corners.bottomLeftCorner.x);
+        const minY = Math.min(corners.topLeftCorner.y, corners.topRightCorner.y);
+        const maxX = Math.max(corners.topRightCorner.x, corners.bottomRightCorner.x);
+        const maxY = Math.max(corners.bottomLeftCorner.y, corners.bottomRightCorner.y);
+        const width = maxX - minX;
+        const height = maxY - minY;
 
-        feedback.textContent = `🔎 Detectados ${pontos.length} ponto(s)`;
+        const imageDataCropped = ctx.getImageData(minX, minY, width, height);
+        const canvasCrop = document.createElement('canvas');
+        canvasCrop.width = width;
+        canvasCrop.height = height;
+        const ctxCrop = canvasCrop.getContext('2d');
+        ctxCrop.putImageData(imageDataCropped, 0, 0);
 
-        if (pontos.length === 4 && !captured) {
-          let ordered = ordenarPontos(pontos);
-          let envolvente = calcularEnvolvente(ordered);
+        const base64 = canvasCrop.toDataURL('image/png');
+        resultado.src = base64;
+        resultado.style.display = 'block';
+        recapturar.style.display = 'inline-block';
 
-          overlay.style.left = envolvente.left + 'px';
-          overlay.style.top = envolvente.top + 'px';
-          overlay.style.width = envolvente.width + 'px';
-          overlay.style.height = envolvente.height + 'px';
-
-          feedback.textContent = "✅ Alinhado! Capturando...";
-          captured = true;
-
-          let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [].concat(...ordered.map(p => [p.x, p.y])));
-          let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-            0, 0, 1000, 0, 1000, 1414, 0, 1414
-          ]);
-          let M = cv.getPerspectiveTransform(srcTri, dstTri);
-          let warped = new cv.Mat();
-          cv.warpPerspective(src, warped, M, new cv.Size(1000, 1414));
-
-          let canvasResult = document.createElement('canvas');
-          canvasResult.width = 1000;
-          canvasResult.height = 1414;
-          let ctxResult = canvasResult.getContext('2d');
-          let imgData = new ImageData(new Uint8ClampedArray(warped.data), 1000, 1414);
-          ctxResult.putImageData(imgData, 0, 0);
-
-          desenharZonasDeBolhas(ctxResult);
-
-          let base64 = canvasResult.toDataURL('image/png');
-          resultado.src = base64;
-          resultado.style.display = 'block';
-          recapturar.style.display = 'inline-block';
-
-          let link = document.createElement('a');
-          link.href = base64;
-          link.download = 'cartao_resposta.png';
-          link.click();
-        }
-
+        const link = document.createElement('a');
+        link.href = base64;
+        link.download = 'captura_qrcode.png';
+        link.click();
+      } else {
+        feedback.textContent = '🔍 Aguardando QR Code...';
         requestAnimationFrame(processFrame);
       }
-
-      requestAnimationFrame(processFrame);
     }
 
-    window.Module = {
-      onRuntimeInitialized() {
-        startApp();
-      }
-    };
+    window.onload = startCamera;
   </script>
 </body>
 </html>
