@@ -2,14 +2,14 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Scanner de Gabarito</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scanner com Alinhamento Animado</title>
   <style>
     body, html {
       margin: 0;
       padding: 0;
+      background: #000;
       overflow: hidden;
-      background-color: #000;
     }
     video, canvas {
       position: absolute;
@@ -17,10 +17,24 @@
       width: 100vw;
       height: 100vh;
       object-fit: cover;
+      z-index: 0;
+    }
+    #overlayFrame {
+      position: absolute;
+      border: 3px solid lime;
+      width: 80vw;
+      height: 60vh;
+      top: 20vh;
+      left: 10vw;
+      border-radius: 10px;
+      z-index: 2;
+      transition: all 0.3s ease-out;
+      pointer-events: none;
     }
     #feedback {
       position: absolute;
-      top: 20px; left: 50%;
+      top: 20px;
+      left: 50%;
       transform: translateX(-50%);
       background: rgba(0,0,0,0.6);
       color: white;
@@ -28,34 +42,54 @@
       border-radius: 10px;
       font-size: 18px;
       font-weight: bold;
-      z-index: 10;
+      z-index: 3;
     }
     #resultado {
       position: absolute;
-      top: 0;
-      right: 0;
-      width: 200px;
+      top: 10px;
+      right: 10px;
       border: 2px solid #0f0;
-      z-index: 10;
+      display: none;
+      max-height: 200px;
+      z-index: 4;
     }
   </style>
 </head>
 <body>
   <video id="video" autoplay playsinline></video>
   <canvas id="canvasOutput"></canvas>
+  <div id="overlayFrame"></div>
   <div id="feedback">Aguardando detecção...</div>
-  <img id="resultado" style="display:none;" />
+  <img id="resultado" />
 
   <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
   <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvasOutput');
-    const ctx = canvas.getContext('2d');
-    const feedback = document.getElementById('feedback');
-    const resultado = document.getElementById('resultado');
+    let video = document.getElementById('video');
+    let canvas = document.getElementById('canvasOutput');
+    let ctx = canvas.getContext('2d');
+    let overlay = document.getElementById('overlayFrame');
+    let feedback = document.getElementById('feedback');
+    let resultado = document.getElementById('resultado');
     let captured = false;
 
-    cv['onRuntimeInitialized'] = () => {
+    function ordenarPontos(pontos) {
+      pontos.sort((a, b) => a.x + a.y - (b.x + b.y));
+      const [tl, br] = [pontos[0], pontos[3]];
+      const [tr, bl] = pontos[1].x > pontos[2].x ? [pontos[1], pontos[2]] : [pontos[2], pontos[1]];
+      return [tl, tr, br, bl];
+    }
+
+    function calcularEnvolvente(pontos) {
+      const xs = pontos.map(p => p.x);
+      const ys = pontos.map(p => p.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      return { left: minX, top: minY, width: maxX - minX, height: maxY - minY };
+    }
+
+    function startApp() {
       navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
         .then(stream => {
           video.srcObject = stream;
@@ -67,13 +101,6 @@
         canvas.height = video.videoHeight;
         startProcessing();
       });
-    };
-
-    function ordenarPontos(pontos) {
-      pontos.sort((a, b) => a.x + a.y - (b.x + b.y));
-      const [tl, br] = [pontos[0], pontos[3]];
-      const [tr, bl] = pontos[1].x > pontos[2].x ? [pontos[1], pontos[2]] : [pontos[2], pontos[1]];
-      return [tl, tr, br, bl];
     }
 
     function startProcessing() {
@@ -99,41 +126,41 @@
           if (area > 100 && area < 1500) {
             let M = cv.moments(cnt);
             if (M.m00 !== 0) {
-              let cx = M.m10 / M.m00;
-              let cy = M.m01 / M.m00;
-              pontos.push({ x: cx, y: cy });
+              pontos.push({ x: M.m10 / M.m00, y: M.m01 / M.m00 });
             }
           }
         }
 
         if (pontos.length === 4 && !captured) {
-          feedback.textContent = "📐 Capturando e corrigindo...";
+          let ordered = ordenarPontos(pontos);
+          let envolvente = calcularEnvolvente(ordered);
+
+          overlay.style.left = envolvente.left + 'px';
+          overlay.style.top = envolvente.top + 'px';
+          overlay.style.width = envolvente.width + 'px';
+          overlay.style.height = envolvente.height + 'px';
+
+          feedback.textContent = "✅ Alinhado! Capturando...";
           captured = true;
 
-          let ordered = ordenarPontos(pontos);
           let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [].concat(...ordered.map(p => [p.x, p.y])));
           let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
             0, 0, 1000, 0, 1000, 1414, 0, 1414
           ]);
-
           let M = cv.getPerspectiveTransform(srcTri, dstTri);
-          let dst = new cv.Mat();
-          let dsize = new cv.Size(1000, 1414);
-          cv.warpPerspective(src, dst, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+          let warped = new cv.Mat();
+          cv.warpPerspective(src, warped, M, new cv.Size(1000, 1414));
 
-          // Mostrar imagem
-          let canvas2 = document.createElement('canvas');
-          canvas2.width = 1000;
-          canvas2.height = 1414;
-          let ctx2 = canvas2.getContext('2d');
-          let imgData = new ImageData(new Uint8ClampedArray(dst.data), 1000, 1414);
-          ctx2.putImageData(imgData, 0, 0);
-          let base64 = canvas2.toDataURL('image/png');
+          let canvasResult = document.createElement('canvas');
+          canvasResult.width = 1000;
+          canvasResult.height = 1414;
+          let ctxResult = canvasResult.getContext('2d');
+          let imgData = new ImageData(new Uint8ClampedArray(warped.data), 1000, 1414);
+          ctxResult.putImageData(imgData, 0, 0);
+          let base64 = canvasResult.toDataURL('image/png');
           resultado.src = base64;
           resultado.style.display = 'block';
-          feedback.textContent = "✅ Cartão capturado!";
 
-          // Baixar automaticamente
           let link = document.createElement('a');
           link.href = base64;
           link.download = 'cartao_resposta.png';
@@ -147,6 +174,12 @@
 
       requestAnimationFrame(processFrame);
     }
+
+    window.Module = {
+      onRuntimeInitialized() {
+        startApp();
+      }
+    };
   </script>
 </body>
 </html>
