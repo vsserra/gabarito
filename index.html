@@ -154,7 +154,7 @@
         for (let i = 0; i < contours.size(); i++) {
           let cnt = contours.get(i);
           let area = cv.contourArea(cnt);
-          if (area > 100 && area < 1500) {
+          if (area > 500 && area < 5000) {
             let M = cv.moments(cnt);
             if (M.m00 !== 0) {
               pontos.push({ x: M.m10 / M.m00, y: M.m01 / M.m00 });
@@ -165,6 +165,8 @@
             }
           }
         }
+
+        feedback.textContent = `🔎 Detectados ${pontos.length} ponto(s)`;
 
         if (pontos.length === 4 && !captured) {
           let ordered = ordenarPontos(pontos);
@@ -204,8 +206,6 @@
           link.href = base64;
           link.download = 'cartao_resposta.png';
           link.click();
-        } else if (!captured) {
-          feedback.textContent = "🔍 Aguardando detecção dos 4 pontos...";
         }
 
         requestAnimationFrame(processFrame);
